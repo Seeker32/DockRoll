@@ -1,37 +1,4 @@
----
-schema_version: 1
-id: ota-release-manifest-v1
-type: technical
-title: 发布清单 Schema v1.0 与校验规则
-summary: 冻结 manifest.json v1.0 的字段、必填/可选规则、digest 与哈希校验、密钥引用、资源归属、存量接管和版本演进策略。
-status: active
-lang: zh-CN
-owners: [Seeker32]
-tags: [ota, m0, release, schema, contract]
-updated_at: 2026-10-24
-order: 30
-area: ota
----
-
 # 发布清单 Schema v1.0 与校验规则
-
-## 状态与证据
-
-2026-10-24 完成 `manifest.json` v1.0 的 schema、字段规则、机器校验器、合法/非法样例和评审记录。本页是**规则说明和实现契约**；可执行的 JSON Schema、命令和样例位于证据目录，错误输出与哈希见[发布清单 Schema 验证记录（2026-10-24）](../evidence/Release-Manifest-Schema-2026-10-24.md)。
-
-| 交付物 | 位置 |
-| --- | --- |
-| JSON Schema（Draft 2020-12） | [manifest.schema.json](../../verification/release-schema-2026-10-24/manifest.schema.json) |
-| 校验器（结构 + 语义规则） | [validate_manifest.py](../../verification/release-schema-2026-10-24/validate_manifest.py) |
-| Python 依赖 | [requirements.txt](../../verification/release-schema-2026-10-24/requirements.txt)（jsonschema 4.26.0、cryptography 50.0.2） |
-| 一键回归命令 | [run-validation.sh](../../verification/release-schema-2026-10-24/run-validation.sh) |
-| 合法样例（三类） | [samples/valid](../../verification/release-schema-2026-10-24/samples/valid/) |
-| 非法样例（32 类） | [samples/invalid](../../verification/release-schema-2026-10-24/samples/invalid/) |
-| 完整校验输出 | [validation-2026-10-24.txt](../../verification/release-schema-2026-10-24/output/validation-2026-10-24.txt) |
-| 评审记录 | [发布清单 Schema v1.0 评审记录](../evidence/Release-Manifest-Schema-Review-2026-10-24.md) |
-| Story | [发布清单 schema v1 与校验](../stories/Story-Release-Manifest-Schema.md) |
-
-本页冻结的是**发布目标和执行契约**，不包含业务数据迁移或数据库变更承诺；也不实现 M1 的下载、Docker/Compose 执行器或签名信任根。签名信任、公钥预置/轮换和回滚授权由[状态机、恢复与安全设计](../stories/Story-Recovery-Security-Design.md)定义。
 
 ## 命名约定
 
@@ -364,22 +331,3 @@ Schema **不再声明 `default` 注解**，避免 Agent 各自实现默认值导
 3. 在受支持的 major.minor 内，未知字段始终拒绝；不能以“向前兼容”为由放宽字段白名单。
 4. 文档澄清、拼写修正且不改变 schema 字节和校验结果时不升级版本；一旦改变可观察校验行为，至少升 minor。
 5. 已发布 manifest 不可原地修改；任何目标变化都必须生成新 `releaseId` 并重新签名。回滚引用旧 manifest，不修改旧文件。
-
-## 与后续 stories 的交接
-
-- [Story 4：三类参考发布包与 Compose 规则](../stories/Story-Release-Packages.md) 复用本页 schema 和 `samples/`，补齐单容器/Compose/配置三类完整包、Compose 字段子集、资源归属与接管步骤；本页的合法样例可作为其 manifest 基线，非法样例可共同维护。
-- M1 实现时应把 `manifest.schema.json`、校验器和样例**复制/固定到 DockRoll 代码仓库**（或作为构建依赖），锁定 schema SHA-256 与 Python 依赖版本；设备端预检查不得依赖运行时下载 schema。
-- 安全设计负责签名信任根和公钥生命周期；M1 负责下载、按 digest 拉取、按哈希/大小校验和激活前拒绝。
-- 本页不实现 Compose 执行器、配置 reload 或回滚执行；这些从 M1 开始。
-
-## 评审与未决事项
-
-技术评审记录见[发布清单 Schema v1.0 评审记录](../evidence/Release-Manifest-Schema-Review-2026-10-24.md)，样例和校验输出已登记到[M0 证据索引](../evidence/M0-Evidence-Index.md)。未决事项：
-
-| 事项 | Owner | 期限/门禁 |
-| --- | --- | --- |
-| 生产签名信任根、公钥分发/轮换/过期、重放防护 | 安全/平台 owner（Seeker32 暂代） | M0 安全设计评审 / M1 签名校验实现前 |
-| Compose 文件字段子集、`compose config` 解析、与 manifest 服务集合的一致性检查 | Platform Engineer | Story 4 交付 / M1 预检查 |
-| schema 与校验器进入 DockRoll 仓库并固定依赖/SHA-256 | Agent Engineer | M1 开始前 |
-| registry 拉取按 digest 的实际校验与失败分类 | Agent Engineer | M1 下载/校验实现 |
-| 真实设备上的配置 reload/重建行为验证 | Platform Engineer | M1/M3 真实设备验证 |
