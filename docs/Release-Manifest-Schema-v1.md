@@ -1,5 +1,7 @@
 # 发布清单 Schema v1.0 与校验规则
 
+状态：v1.0 候选规范，尚未冻结。
+
 ## 命名约定
 
 - JSON 字段名统一使用 **camelCase**（如 `schemaVersion`、`appId`、`sharedResources`、`readOnly`）。
@@ -13,7 +15,7 @@
 - 发布类型只有三种：`single_container`、`compose`、`config`。每个 manifest 必须且只能携带与 `releaseType` 对应的一个载荷块（`container`、`compose` 或 `config`）。
 - manifest 只描述目标状态和校验/执行参数，不在清单内内联配置内容、镜像层或密钥值；镜像由 registry 分发，配置/Compose 文件由制品地址分发。
 - 未知字段一律拒绝；字段白名单是 OTA 预检查的一部分，不依赖 Docker/Compose 的错误文本。
-- Compose 文件本身的字段子集（禁止 `build`、远程 `include`、`profiles` 的默认激活等）由[三类参考发布包与 Compose 规则](../stories/Story-Release-Packages.md)定义；本页只冻结 manifest 如何引用 Compose 文件、服务集合、镜像 digest 和共享资源。
+- Compose 文件的字段子集（禁止 `build`、远程 `include`、`profiles` 的默认激活等）由[三类参考发布包与 Compose 规则](../stories/Story-Release-Packages.md)定义；[Compose 载荷](#compose-载荷)规定设备如何锁定输入、服务集合和镜像 digest。
 - 校验器不拉取镜像、不启动容器、不修改宿主机；M1 在下载阶段按 digest 拉取，并按本页规则做预检查。
 
 ## 文件布局与命令
@@ -57,12 +59,12 @@ python3 validate_manifest.py samples/invalid/inline-secret/manifest.json   # 退
 | `compatibility` | 是 | object | 见[兼容性条件](#兼容性条件) |
 | `ownership` | 是 | object | 见[资源归属与映射](#资源归属与映射) |
 | `takeover` | 否 | object | 存量接管；缺省等价 `mode: none` |
-| `sharedResources` | 否 | array | 受保护的共享卷/网络/宿主机路径；默认空数组；最多 32 项，见[共享资源声明](#共享资源声明) |
+| `sharedResources` | 否 | array | 本次声明保护的共享卷、网络和宿主机路径；最多 32 项；缺省不撤销已有保护，见[共享资源声明](#共享资源声明) |
 | `container` | 条件必填 | object | `releaseType=single_container` 时必填 |
 | `compose` | 条件必填 | object | `releaseType=compose` 时必填 |
 | `config` | 条件必填 | object | `releaseType=config` 时必填 |
 | `secrets` | 否 | array | 受控密钥引用；默认空数组；禁止任何内联值 |
-| `applyPolicy` | 是 | object | 配置生效策略；见[配置生效](#配置生效策略) |
+| `applyPolicy` | 是 | object | 配置生效策略；纯配置发布作用于同一 `appId` 的现有部署，见[配置生效策略](#配置生效策略) |
 | `health` | 是 | object | 健康检查与观察窗口 |
 | `rollback` | 是 | object | 回滚策略 |
 | `signature` | 是 | object | 签名信封；见[签名](#签名) |
@@ -106,8 +108,8 @@ python3 validate_manifest.py samples/invalid/inline-secret/manifest.json   # 退
 
 - 新增服务 = `compose.services[]` − `takeover.existingServices[]`。
 - 删除服务 = `takeover.existingServices[]` − `compose.services[]`；删除是有意的目标状态差异，不需要额外的 `remove_services` 字段。
-- 回滚按回滚目标的 manifest 重新部署**完整集合**：恢复目标有、当前没有的服务，并删除目标没有、但属于同一 `appId` 的受管服务；不得留下占用端口的残留服务。
-- `sharedResources[]`（`kind` 为 `volume`、`network` 或 `bind_path`，`protection` 固定 `preserve`）永远不因升级或回滚被删除；`takeover.preserveSharedResources` 必须与之一致。
+- 部署回滚按目标部署状态恢复**完整集合**：恢复目标有、当前没有的服务，并删除目标没有、但属于同一 `appId` 的受管服务；不得留下占用端口的残留服务。纯配置发布的文件恢复见[回滚策略](#回滚策略)。
+- `takeover.preserveSharedResources` 只引用本清单的 `sharedResources[]`；未列入接管引用的资源仍按设备上已有和本次新增的保护记录处理。
 - 存量接管前必须记录现有项目名、服务集合、共享资源和数据卷；当前盘点见[现有部署盘点](Existing-Deployment-Inventory.md)。
 
 ### 共享资源声明
@@ -129,6 +131,10 @@ python3 validate_manifest.py samples/invalid/inline-secret/manifest.json   # 退
   {"kind": "bind_path", "name": "demo-single-config", "path": "/srv/demo-single/config", "protection": "preserve"}
 ]
 ```
+
+设备在执行发布或接管前，必须按 `appId`、资源类型和实际资源身份持久记录保护。卷和网络在 Compose 部署中按有效模型的同类资源键解析为 Docker 实际名称；未引用模型资源时使用显式 Docker 名称。`bind_path` 使用宿主机上的规范化真实路径。若无法确定唯一的实际资源，则拒绝本次发布。执行升级、回滚或垃圾回收时，以设备上仍有效的保护记录为准；不得直接删除受保护资源，也不得通过递归删除上级目录间接删除受保护路径。
+
+新版本省略 `sharedResources`、提交空数组、变更逻辑名，或回滚到不含该声明的旧版本，都不会撤销已有保护。只有单独授权的显式操作才可撤销某应用对该资源的保护；只要还有任一应用的有效记录，就不得删除。撤销保护本身不是删除授权，也不放宽 `rollback.preserveVolumes`。
 
 ## 单容器载荷
 
@@ -191,11 +197,17 @@ Compose 文件中的 bind mount 不会被当前 manifest 校验器解析；M1 �
 | 字段 | 必填 | 规则 |
 | --- | --- | --- |
 | `file` | 是 | 制品对象：相对 `path`、`sha256`、`sizeBytes`；校验器检查文件存在、大小和哈希 |
-| `envFiles` | 否 | 制品数组；默认空数组 |
-| `services` | 是 | 非空数组，每项 `name`（Compose service 名）、`image`（digest 固定）和 `required`（布尔，显式必填）；不再使用 schema default |
-| `profiles` | 否 | 字符串数组；默认空数组；若使用 profile 必须在这里显式声明，不能假设默认激活 |
+| `envFiles` | 否 | 制品数组；默认空数组；按声明顺序提供插值变量，同名变量以后一个文件为准 |
+| `services` | 是 | 启用的完整服务集合，非空且 `name` 不重复；每项包含 `name`（Compose service 名）、`image`（digest 固定）和 `required`（布尔，显式必填，参与[健康判定](#健康检查与观察窗口)） |
+| `profiles` | 否 | 字符串数组；默认空数组；只启用显式声明的 profile |
 
-`compose.services[]` 与 `compose.yaml` 必须表达同一个服务集合和镜像 digest；每个 service 的 `image.platform` 若声明，也必须属于 `compatibility.arch`；本页的校验器只验证 manifest 侧和文件哈希，**Compose 文件语义解析、字段子集和 `compose config` 校验属于 Story 4/M1 预检查**。Compose 文件中的镜像也必须按 digest 固定，不能用 tag。
+本页的校验器只验证 manifest 侧和文件哈希；Compose 字段子集和有效模型由设备在 M1 预检查：
+
+1. 使用 `compose.file`、已校验的 `compose.envFiles`、`compose.profiles` 和 `ownership.composeProjectName` 显式解析有效模型。禁止继承设备环境中的插值变量或 Compose 控制变量，禁止自动读取 `.env` 或发现追加的 Compose 文件；发布的环境文件不得覆盖 Compose 控制参数。未解析且无显式默认值的变量导致预检查失败。除按策略在设备上解析的宿主机 bind 路径和受控密钥引用外，模型引用的发布包文件必须由 manifest 声明并校验；服务的 `env_file` 也只能引用 `compose.envFiles` 中的制品。
+2. 按有效模型比对服务集合和每个服务的镜像仓库及 digest，不能用 tag。未绑定 profile 的服务及命中显式 profile 的服务纳入比对；未启用的服务不纳入。启用的依赖不完整则拒绝；不得靠指定单个服务隐式启用额外 profile。若声明 `image.platform`，其架构必须属于 `compatibility.arch`。
+3. 部署和回滚必须使用对应版本预检查通过的有效模型，或用同一份已校验的输入和同样的解析参数得到相同模型后再执行。不得在执行时重新读取设备环境、隐式文件或未经校验的内容；[bind mount 安全边界](#bind-mount-安全边界)也以该模型为准。
+
+Compose 的默认行为见 Docker 的[变量插值](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)和 [profile](https://docs.docker.com/compose/how-tos/profiles/) 文档；DockRoll 用上述显式输入替代默认发现行为。
 
 ## 配置载荷
 
@@ -207,7 +219,7 @@ Compose 文件中的 bind mount 不会被当前 manifest 校验器解析；M1 �
 | `mode` | 是 | 四位八进制字符串（如 `0640`）；拒绝 world-writable（其他用户可写） |
 | `uid` / `gid` | 是 | 非负整数；落盘时按此设置属主 |
 
-配置目录通过 bind mount 暴露给容器；单文件挂载/重建行为由 `applyPolicy` 指定。配置源文件按哈希和大小校验通过后才允许落盘。
+`config.files[]` 只列出本次要写入的文件；省略的文件保持原状。配置源文件按哈希和大小校验通过后，设备必须先持久保存每个目标文件的原内容、权限、UID/GID，或记录该文件原本不存在，再开始写入。设备须在任何写入前拒绝无法安全备份或恢复的目标，并保留这些记录直到发布提交或回滚完成。配置通过 bind mount 暴露给现有部署；具体生效范围见[配置生效策略](#配置生效策略)。
 
 ## 密钥与内联禁止
 
@@ -249,15 +261,24 @@ Compose 文件中的 bind mount 不会被当前 manifest 校验器解析；M1 �
 
 | 类型 | 必填字段 | 说明 |
 | --- | --- | --- |
-| `http` | `path`、`port`、`scheme`、`expectedStatus` | `expectedStatus` 可填 100～599 的整数或 `2xx`/`3xx`/`4xx`/`5xx` 类；可选 `service`，仅 Compose 使用 |
-| `tcp` | `port` | 可选 `service` |
-| `command` | `command`（非空数组） | 可选 `service` |
+| `http` | `path`、`port`、`scheme`、`expectedStatus` | `expectedStatus` 可填 100～599 的整数或 `2xx`/`3xx`/`4xx`/`5xx` 类 |
+| `tcp` | `port` | 探测容器内端口 |
+| `command` | `command`（非空数组） | 在受检容器内执行，退出码 `0` 为通过 |
 
-公共字段：`intervalSeconds`（1～300）、`timeoutSeconds`（1～120，且必须小于 `intervalSeconds`）、`retries`（1～10）、`startupGraceSeconds`（0～600）、`observationWindowSeconds`（10～3600）、`successCriteria`（`all_services_healthy` / `primary_service_healthy`）。Compose 多服务使用 `primary_service_healthy` 时必须显式给出 `check.service`。
+公共字段：`intervalSeconds`（1～300）、`timeoutSeconds`（1～120，且必须小于 `intervalSeconds`）、`retries`（1～10）、`startupGraceSeconds`（0～600）、`observationWindowSeconds`（10～3600）、`successCriteria`（`all_services_healthy` / `primary_service_healthy`）。三种探针都支持同样的 `check.service` 规则：只可用于 Compose 部署，且必须引用启用的服务。`config` 发布以预检查绑定的现有部署及其服务集合为准，由设备校验引用。
 
-`health.check.port` 表示**容器内端口**，从应用网络内部探测，不要求该端口已发布到宿主机；`expectedStatus` 支持 `204` 这类精确值和 `2xx` 类匹配。`observationWindowSeconds` 是健康观察时间；`rollback.deadlineSeconds` 从观察判定失败后开始计时，不包含观察窗口，因此两者不强制大小关系，但总恢复时间应按设备 RTO 单独核算。
+| 部署与判定条件 | 每轮通过条件 |
+| --- | --- |
+| 单容器，两种 `successCriteria` | 容器在运行且显式探针通过；禁止 `check.service` |
+| Compose，`primary_service_healthy` | 只检查主服务；多服务必须显式指定 `check.service`，只有一个启用服务时可省略。受检服务的每个预期实例都必须在运行且探针通过 |
+| Compose，`all_services_healthy`，未指定 `check.service` | 必须至少有一个 `required: true` 的启用服务；对每个必需服务的全部预期实例运行同一个探针，每个实例都必须在运行且通过探针 |
+| Compose，`all_services_healthy`，指定了 `check.service` | 指定服务必须是启用的必需服务，其全部预期实例都必须在运行且通过显式探针；其他必需服务的全部预期实例都必须在运行且 Docker 容器健康状态为 `healthy`。其他必需服务缺少有效 `HEALTHCHECK` 时在预检查拒绝，不能用「正在运行」代替健康 |
 
-只有健康检查在观察窗口内持续满足条件，才允许提交成功；失败进入回滚。检查命令由应用方提供，校验器只校验结构和引用关系。
+`all_services_healthy` 下，`required: false` 不参与成功判定，但仍属于部署集合。预期实例缺失、退出或探针超时均视为该轮未通过。例如，`api` 的 HTTP 探针通过但必需的 `worker` 已退出，整轮仍然失败。
+
+`health.check.port` 表示**容器内端口**，从应用网络内部探测，不要求该端口已发布到宿主机；`expectedStatus` 支持 `204` 这类精确值和 `2xx` 类匹配。`rollback.deadlineSeconds` 从发布判定失败时开始计时（包括配置生效失败或观察判定失败），不包含观察时间；总恢复时间应按设备 RTO 单独核算。
+
+启动宽限期结束后立即开始观察并执行首轮检查，首轮超时不得超过剩余观察时间。之后每隔 `intervalSeconds` 发起一轮，但剩余观察时间不足 `timeoutSeconds` 时不再发起新一轮。若连续 `retries` 轮失败，则提前判定失败；观察窗口结束时，只有至少完成一轮且发起的每一轮均已通过，才可提交，否则回滚。清单校验器仅检查结构和清单内可判定的引用，已部署对象及其健康检查能力由设备预检查确认。
 
 ## 时间戳语义
 
@@ -274,24 +295,37 @@ Compose 文件中的 bind mount 不会被当前 manifest 校验器解析；M1 �
 | --- | --- | --- |
 | `applyPolicy.strategy` | 是 | `reload` / `restart_container` / `recreate_container` |
 | `applyPolicy.reload.command` | 条件必填 | `strategy=reload` 时必填，非空字符串数组 |
-| `applyPolicy.reload.timeoutSeconds` | 条件必填 | 1～300 |
-| `applyPolicy.reload.service` | 否 | 仅 Compose；必须在 `compose.services[]` 中 |
+| `applyPolicy.reload.timeoutSeconds` | 条件必填 | `strategy=reload` 时必填，1～300 秒 |
+| `applyPolicy.reload.service` | 条件必填 | 仅 Compose 部署；有多个启用服务时必填，且必须引用启用的服务。只有一个启用服务时可省略 |
 
-`strategy` 非 `reload` 时禁止出现 `reload` 块，避免声明与实际执行不一致。目录挂载 + reload 与单文件挂载/重建两类行为的完整样例由 Story 4 演示；本 Story 冻结枚举和条件约束。
+`strategy` 非 `reload` 时禁止出现 `reload` 块。对于 `config`，预检查必须按 `appId` 找到并绑定设备当前已提交的单容器或 Compose 部署，记录部署版本、启用服务及其配置挂载。找不到唯一目标、配置未挂载到该部署、策略不能使修改生效，或目标在应用前已变化时，拒绝写入。设备按 `appId` 串行执行配置更新和部署切换。
+
+- `reload`：在绑定的单容器或指定 Compose 服务的全部运行实例中执行命令。若受影响的配置还被其他服务使用，不得用一次定向 reload 作为整个发布的生效策略。只有选定实例能读到新配置且命令全部成功时才进入观察。
+- `restart_container`：重启绑定部署中挂载受影响配置的容器，不改镜像或服务集合。
+- `recreate_container`：按绑定的部署版本重建挂载受影响配置的容器，不改镜像或服务集合。若原单文件 bind mount 不能看到替换后的文件，必须使用此策略。
 
 ## 回滚策略
 
 | 字段 | 必填 | 规则 |
 | --- | --- | --- |
-| `strategy` | 是 | `previous_release` / `explicit_release` |
-| `targetReleaseId` | 条件必填 | `explicit_release` 时必填，且不能等于当前 `releaseId`；`previous_release` 时禁止 |
+| `strategy` | 是 | `previous_release`：回到本次发布开始前的已提交状态；`explicit_release`：恢复指定发布的状态 |
+| `targetReleaseId` | 条件必填 | `explicit_release` 时必填；必须属于同一 `appId`，且不能等于当前 `releaseId`。`previous_release` 时禁止 |
 | `maxAttempts` | 是 | 1～3 |
 | `failureAction` | 是 | `escalate`（停止自动切换并转人工）/ `keep_failed` |
 | `preserveVolumes` | 是 | 固定 `true`；禁止删除业务数据卷 |
-| `restoreServiceSet` | 是 | 固定 `true`；回滚必须恢复目标的完整服务集合 |
+| `restoreServiceSet` | 是 | 固定 `true`；回滚必须恢复目标的完整服务集合，纯配置回滚不得把配置清单当作部署清单 |
 | `deadlineSeconds` | 是 | 30～1800；超时进入人工处置 |
 
-回滚目标是完整 manifest，不是一个增量补丁。回滚后必须核对：服务集合、端口占用、共享资源、数据卷和健康状态；失败时保留诊断，不自动再次切换。
+部署回滚使用目标版本的完整部署状态，包括部署清单及与之对应的受管配置；配置清单本身不能重建服务。采用 `explicit_release` 时，设备须在变更前确认指定目标可完整恢复。若该目标是 `config`，必须能取得其提交时记录的部署版本和完整受管配置状态，仅有 `config.files[]` 不够。
+
+纯配置发布失败时，设备先撤销本次写入：恢复原文件内容和权限、属主，删除本次创建且原先不存在的配置文件。不触碰其他文件或受保护资源；若预检查发现撤销写入与共享资源保护冲突，必须拒绝该配置发布。然后根据策略恢复运行状态：
+
+- `previous_release`：保留变更前绑定的部署。若已经开始使新配置生效，用恢复后的配置和原部署定义重建受影响的容器，不重新执行本次失败的 reload 命令。
+- `explicit_release`：在撤销本次写入后恢复已确认的目标部署和配置状态。按目标状态处理受管文件，不能只重放目标配置清单。
+
+例如，Compose 版本 A 已在运行，纯配置版本 B 新建了 `extra.conf` 后探针失败；`previous_release` 必须撤销该文件。即使重新应用 A 的 Compose 文件，也不能代替这一步。
+
+回滚后必须按恢复目标核对服务集合、端口占用、共享资源、数据卷和健康状态。回滚达到尝试上限或超时仍未成功时，保留诊断并按 `failureAction` 处理，不自动切到其他版本。
 
 ## 签名
 
@@ -301,9 +335,18 @@ Compose 文件中的 bind mount 不会被当前 manifest 校验器解析；M1 �
 | `keyId` | 是 | 稳定密钥标识 |
 | `signedAt` | 是 | UTC 时间 |
 | `canonicalization` | 是 | 固定 `RFC8785` |
-| `signature` | 是 | Base64 编码签名值；Ed25519 固定 64 字节 |
+| `signature` | 是 | 使用 [RFC 4648 §4](https://www.rfc-editor.org/rfc/rfc4648.html#section-4) 标准 Base64，按需保留 `=` 填充；拒绝空白、非规范填充和 Base64URL |
 
-签名对象是**删除 `signature.signature` 后的 manifest 规范化字节**；`algorithm`、`keyId`、`signedAt`、`canonicalization` 都在签名保护范围内。规范化采用 RFC 8785 JCS 的受限子集：只允许对象、数组、字符串、整数、布尔和 null，禁止浮点数（本 schema 的所有数值字段都是整数），对象键按 UTF-16 code unit 排序（与 RFC 8785 一致）。`ownership.labels` 的键进一步限制为 ASCII，避免 Docker label 格式和跨语言排序差异。签名者对删除 `signature.signature` 后的规范化字节签名；校验器输出的 `manifest_digest=sha256:<…>` 是这些字节的 SHA-256，用于引用和比对，不是另行签名的对象。
+规范化采用 [RFC 8785 JCS](https://www.rfc-editor.org/rfc/rfc8785.html) 的受限子集。解析 manifest 时，在对象归并或数值转换前拒绝重复的对象键（按解码后的键名比较）、非法 UTF-8 和不成对的 UTF-16 代理项。所有数值字段只接受十进制整数记法（禁止小数点和指数），先精确检查范围 `-9007199254740991`～`9007199254740991`（含端点），再应用具体字段的更窄约束。生成 JCS 字节时按 UTF-16 code unit 排序对象键，保持数组顺序和 Unicode 字符串内容不变，并输出 UTF-8。
+
+签名输入由删除 `signature.signature` 后的 manifest 生成；`algorithm`、`keyId`、`signedAt`、`canonicalization` 仍受签名保护。签名和验签使用以下规则：
+
+| 算法 | 对什么签名 | Base64 解码后的签名 |
+| --- | --- | --- |
+| `ed25519` | 直接签 JCS 字节，不预哈希，也不使用 `Ed25519ph` | 固定 64 字节 |
+| `ecdsa-p256-sha256` | 用 P-256 签 JCS 字节的单次 SHA-256 摘要 | ASN.1 DER 编码的 `SEQUENCE { r INTEGER, s INTEGER }`；拒绝裸 `R‖S`、非 DER 编码和尾随数据 |
+
+校验器输出的 `manifest_digest=sha256:<…>` 是同一份 JCS 字节的 SHA-256，用于引用和比对；不签名这段文本。
 
 本 Story 只冻结信封和规范化规则；签名信任根、公钥预置/轮换/过期、重放防护由安全设计定义。`--trusted-key` 仅用于测试样例验证，样例公钥是 **test fixture key，不是生产信任根**。生产发布不得使用样例密钥。
 
@@ -322,9 +365,10 @@ Schema **不再声明 `default` 注解**，避免 Agent 各自实现默认值导
 | `container.ports[].hostIp` | 必填，必须是合法 IPv4/IPv6 |
 | `container.stopGracePeriodSeconds` | 必填整数 |
 | `compose.envFiles` / `compose.profiles` / `secrets` | 缺省按空数组处理；数组本身不写 `default` |
-| `sharedResources` / `metadata` | 缺省不存在 |
+| `sharedResources` | 缺省不新增保护；已有保护不受影响 |
+| `metadata` | 缺省不存在 |
 
-版本演进规则：
+以下版本演进规则适用于首次冻结后：
 
 1. **Major（如 1.0 → 2.0）**：新增必填字段、删除/重命名字段、收窄类型或枚举、改变字段语义、改变签名规范化方式。设备必须拒绝不支持的 major；不承诺向后兼容。
 2. **Minor（如 1.0 → 1.1）**：只允许新增可选字段或新增不影响 v1.0 语义的校验规则；设备只接受显式支持列表中的版本。旧设备遇到更高 minor 必须在字段校验前拒绝，并报告“不支持的 schema 版本”，而不是把它当作未知字段误报。
