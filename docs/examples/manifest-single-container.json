@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0",
+  "releaseId": "rel-2026-10-25-001",
+  "appId": "edge-api",
+  "releaseType": "single_container",
+  "createdAt": "2026-10-25T09:30:00Z",
+  "metadata": {
+    "appVersion": "2.4.1"
+  },
+  "compatibility": {
+    "os": ["linux"],
+    "arch": ["amd64"],
+    "minAgentVersion": "1.2.0",
+    "minDockerVersion": "24.0.0"
+  },
+  "container": {
+    "image": "registry.example.com/edge/api:2.4.1@sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    "platform": "linux/amd64",
+    "network": { "mode": "bridge" },
+    "restartPolicy": { "name": "unless-stopped" },
+    "resources": {
+      "cpuMillicores": 500,
+      "memoryBytes": 268435456,
+      "pidsLimit": 128
+    },
+    "stopGracePeriodSeconds": 30
+  },
+  "applyPolicy": {
+    "strategy": "recreate_container"
+  },
+  "health": {
+    "check": {
+      "type": "http",
+      "scheme": "http",
+      "path": "/healthz",
+      "port": 8080,
+      "expectedStatus": "2xx"
+    },
+    "intervalSeconds": 10,
+    "timeoutSeconds": 5,
+    "retries": 3,
+    "startupGraceSeconds": 30,
+    "observationWindowSeconds": 300,
+    "successCriteria": "primary_service_healthy"
+  },
+  "rollback": {
+    "strategy": "previous_release",
+    "maxAttempts": 2,
+    "preserveVolumes": true,
+    "restoreServiceSet": true,
+    "deadlineSeconds": 900
+  },
+  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}

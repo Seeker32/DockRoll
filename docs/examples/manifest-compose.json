@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0",
+  "releaseId": "rel-2026-10-25-001",
+  "appId": "web-portal",
+  "releaseType": "compose",
+  "createdAt": "2026-10-25T09:30:00Z",
+  "metadata": {
+    "appVersion": "2.4.1",
+    "description": "Web portal 2.4.1：网关、API 与后台 worker 组成的 Compose 栈"
+  },
+  "compatibility": {
+    "os": ["linux"],
+    "arch": ["amd64", "arm64"],
+    "minAgentVersion": "1.2.0",
+    "minDockerVersion": "24.0.0",
+    "minComposeVersion": "5.0.1"
+  },
+  "compose": {
+    "file": {
+      "path": "compose.yaml",
+      "sha256": "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "sizeBytes": 812
+    },
+    "envFiles": [
+      {
+        "path": "payload/app.env",
+        "sha256": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        "sizeBytes": 96
+      }
+    ],
+    "services": [
+      {
+        "name": "gateway",
+        "image": "registry.example.com/web-portal/gateway:2.4.1@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "required": true
+      },
+      {
+        "name": "api",
+        "image": "registry.example.com/web-portal/api:2.4.1@sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+        "required": true
+      },
+      {
+        "name": "worker",
+        "image": "registry.example.com/web-portal/worker@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required": false
+      }
+    ]
+  },
+  "applyPolicy": {
+    "strategy": "recreate_container"
+  },
+  "health": {
+    "check": {
+      "type": "http",
+      "service": "api",
+      "scheme": "http",
+      "path": "/healthz",
+      "port": 8080,
+      "expectedStatus": "2xx"
+    },
+    "intervalSeconds": 10,
+    "timeoutSeconds": 5,
+    "retries": 3,
+    "startupGraceSeconds": 30,
+    "observationWindowSeconds": 300,
+    "successCriteria": "primary_service_healthy"
+  },
+  "rollback": {
+    "strategy": "previous_release",
+    "maxAttempts": 2,
+    "preserveVolumes": true,
+    "restoreServiceSet": true,
+    "deadlineSeconds": 900
+  },
+  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}

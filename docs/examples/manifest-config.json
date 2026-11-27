@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0",
+  "releaseId": "rel-2026-10-26-002",
+  "appId": "web-portal",
+  "releaseType": "config",
+  "createdAt": "2026-10-26T10:15:00Z",
+  "metadata": {
+    "appVersion": "2.4.1",
+    "description": "更新网关超时与路由配置"
+  },
+  "compatibility": {
+    "os": ["linux"],
+    "arch": ["amd64", "arm64"],
+    "minAgentVersion": "1.2.0",
+    "minDockerVersion": "24.0.0"
+  },
+  "config": {
+    "files": [
+      {
+        "source": {
+          "path": "configs/gateway.conf",
+          "sha256": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "sizeBytes": 512
+        },
+        "targetPath": "/etc/dockroll/apps/web-portal/gateway.conf",
+        "mode": "0640",
+        "uid": 0,
+        "gid": 1000
+      }
+    ]
+  },
+  "applyPolicy": {
+    "strategy": "reload",
+    "reload": {
+      "service": "gateway",
+      "command": ["nginx", "-s", "reload"],
+      "timeoutSeconds": 15
+    }
+  },
+  "health": {
+    "check": {
+      "type": "http",
+      "service": "gateway",
+      "scheme": "http",
+      "path": "/healthz",
+      "port": 8080,
+      "expectedStatus": "2xx"
+    },
+    "intervalSeconds": 10,
+    "timeoutSeconds": 5,
+    "retries": 3,
+    "startupGraceSeconds": 5,
+    "observationWindowSeconds": 120,
+    "successCriteria": "primary_service_healthy"
+  },
+  "rollback": {
+    "strategy": "previous_release",
+    "maxAttempts": 2,
+    "preserveVolumes": true,
+    "restoreServiceSet": true,
+    "deadlineSeconds": 300
+  },
+  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}
